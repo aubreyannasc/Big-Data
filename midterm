@@ -1,0 +1,669 @@
+//==============================================================================
+
+/**
+ * Hadoop map reduce
+ *
+ * https://hadoop.apache.org/docs/stable/hadoop-mapreduce-client/hadoop-mapreduce-client-core/MapReduceTutorial.html
+ *
+ */
+
+//==============================================================================
+
+package test.code001;
+
+//==============================================================================
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.*;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.*;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.log4j.ConsoleAppender;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
+import org.apache.log4j.PatternLayout;
+
+//==============================================================================
+
+/** @noinspection CharsetObjectCanBeUsed, CanBeFinal, unused, Java8ListSort, UseBulkOperation, ArraysAsListWithZeroOrOneArgument, ManualArrayToCollectionCopy, Convert2Diamond , RedundantSuppression */
+public class RestaurantAnalysis001 {
+
+    //==========================================================================
+
+    // Input data structure
+
+    public static String fieldStr = "address_building	address_coord_lat	address_coord_long	address_street	address_zipcode	borough	cuisine	grades_date	grades_date_year	grades_date_ymd	grades_grade	grades_score	name	restaurant_id";
+
+    public static String[] fieldArr = {
+        "address_building",
+        "address_coord_lat",
+        "address_coord_long",
+        "address_street",
+        "address_zipcode",
+        "borough",
+        "cuisine",
+        "grades_date",
+        "grades_date_year",
+        "grades_date_ymd",
+        "grades_grade",
+        "grades_score",
+        "name",
+        "restaurant_id"
+    };
+
+    //public static int numFields;
+
+    public static Map<String, Integer> fieldMap = new HashMap<String, Integer>();
+
+    //==========================================================================
+
+    // Keys
+
+    // Note: The number grades_date_month needs to be calculated from the data
+
+    // TODO: New key is <borough,grades_date_year,grades_date_month>
+    // NOTE: Old key is <borough>
+
+    public static String[] keyArr = {
+        "borough",
+        "grades_date_year",
+        "grades_date_month"
+    };
+
+    public static Map<String, Integer> keyMap = new HashMap<String, Integer>();
+
+    //==========================================================================
+
+    // Values
+
+    // TODO: Add new metrics sum_grades_score and avg_grades_score
+    // NOTE: Old metrics are record_count and count_grades
+
+    // record_count
+    // count_grades
+    // sum_grades_score
+    // avg_grades_score
+    // min_grades_score
+    // max_grades_score
+
+    public static String[] valueArr = {
+        "record_count",
+        "count_grades",
+        "sum_grades_score",
+        "avg_grades_score",
+        "min_grades_score",
+        "max_grades_score"
+    };
+
+    public static final int NUM_VAL = valueArr.length; // 6; // number of metric values
+
+    // TODO: Change metric default values (should have 6 entries)
+    public static float[] defaultValueArr = {
+        (float) 1.0,
+        (float) 1.0,
+        (float) 1.0,
+        (float) 1.0,
+        (float) 1.0,
+        (float) 1.0
+    };
+
+    public static Map<String, Integer> valueMap = new HashMap<String, Integer>();
+
+    //==========================================================================
+
+    // Filter data structure
+
+    // TODO: Specify additional filter items
+
+    public static String[] filterBoroughArr = {"Queens", "Brooklyn", "Bronx"};
+
+    public static Set<String> filterBoroughColl = new HashSet<String>();
+
+    public static String[] filterOddYearArr = {"2011", "2013", "2015"};
+
+    public static Set<String> filterOddYearColl = new HashSet<String>();
+
+    //==========================================================================
+
+    // Output data structure
+
+    // TODO: Modify with changes to key and value
+    // Output field list (keys and values)
+    public static String[] outFieldArr = {
+        "borough",
+        "grades_date_year",
+        "grades_date_month",
+        "record_count",
+        "count_grades",
+        "sum_grades_score",
+        "avg_grades_score",
+        "min_grades_score",
+        "max_grades_score"
+    };
+
+    // TODO: Modify with changes to key and value
+    // Output header string (keys and values)
+    public static String outFieldStr =
+        "borough" + "\t" +
+        "record_count" + "\t" +
+        "count_grades" + "\t" +
+        "sum_grades_score" + "\t" +
+        "avg_grades_score" + "\t" +
+        "min_grades_score" + "\t" +
+        "max_grades_score";
+
+    public static Map<String, Integer> outFieldMap = new HashMap<String, Integer>();
+
+    //==========================================================================
+
+    // Output order
+
+    // Compare two results for desired output order
+    /** @noinspection UnnecessaryLocalVariable, UnusedAssignment */
+    public static class RestaurantResultComparator implements Comparator<String> {
+        /** @noinspection ComparatorMethodParameterNotUsed*/
+        @Override
+        public int compare(String resLine1, String resLine2) {
+            int ret = 0;
+
+            // TODO: Enable commented code below after result key and value are modified
+
+            String[] res1 = resLine1.split("\t");
+            String[] res2 = resLine2.split("\t");
+            int diff_grades_date_month = 0;
+            int diff_grades_date_year = 0;
+            int diff_borough = 0;
+
+            // Note: use negative for reverse order
+
+            if((diff_grades_date_year = (res1[outFieldMap.get("grades_date_year")]
+                    .compareTo(res2[outFieldMap.get("grades_date_year")]))) != 0) {
+                ret = diff_grades_date_year;
+            } else if((diff_grades_date_month = (res1[outFieldMap.get("grades_date_month")]
+                    .compareTo(res2[outFieldMap.get("grades_date_month")]))) != 0) {
+                ret = diff_grades_date_month;
+            } else if((diff_borough = -(res1[outFieldMap.get("borough")]
+                    .compareTo(res2[outFieldMap.get("borough")]))) != 0) {
+                ret = diff_borough;
+            } else {
+                ret = 0;
+            }
+
+            return ret;
+        }
+    }
+
+    //==========================================================================
+
+    // Value representation for mapreduce
+
+    // Use array of floating point numbers to hold calculated data
+    /** @noinspection UnnecessaryCallToStringValueOf*/
+    // https://hadoop.apache.org/docs/stable/api/org/apache/hadoop/io/ArrayWritable.html
+    public static class FloatArrayWritable extends ArrayWritable {
+        public FloatArrayWritable() {
+            super(FloatWritable.class);
+        }
+
+        //@Override
+        //public FloatWritable[] get() {
+        //    return((FloatWritable[])super.get());
+        //}
+
+        //public FloatWritable[] getFloatArray() {
+        //    return (FloatWritable[])super.get();
+        //}
+
+        public FloatWritable[] getFloatWritableArray() {
+            //return (FloatWritable[])super.get();
+            Writable[] wa = super.get();
+            FloatWritable[] fwa = new FloatWritable[wa.length];
+            for(int i = 0; i < fwa.length; i++) {
+                fwa[i] = new FloatWritable(((FloatWritable)wa[i]).get());
+            }
+            return fwa;
+        }
+
+        @Override
+        public String toString() {
+            FloatWritable[] v = getFloatWritableArray();
+            // "%.0f %.0f %.0f %.2f"
+            // "%f %f %f %f"
+            // "%f\t%f\t%f\t%f"
+
+            // Round float to 2 decimal places
+            //float f = 1021.6225F;
+            //float f_round = (float)Math.round((float)100.0 * f) / (float)100.0;
+            //String f_str = Float.toString(f_round);
+
+            // TODO: Add new metrics sum_grades_score and avg_grades_score
+
+            float sum_grades_score = 0.0F;
+            String sum_grades_score_str = "";
+
+            /**
+             * Average grades score avg_grades_score should have at most 2
+             * decimal places of precision. This can be done using the
+             * Math.round() function.
+             */
+            float avg_grades_score = 0.0F;
+            String avg_grades_score_str = "";
+            avg_grades_score = (float)Math.round((float)100.0 * v[3].get()) / (float)100.0;
+
+            float min_grades_score = 0.0F;
+            String min_grades_score_str = "";
+
+            float max_grades_score = 0.0F;
+            String max_grades_score_str = "";
+
+            //String sf = "%.0f\t%.0f";
+            String sf = "%.0f\t%.0f\t%.0f\t%s\t%.0f\t%.0f";
+
+            assert(sf.split("\t").length == NUM_VAL);
+
+            String s = String.format(sf,
+                v[0].get(),
+                v[1].get(),
+                v[2].get(),
+                Float.toString(avg_grades_score),
+                v[4].get(),
+                v[5].get()
+            );
+
+            assert(s.split("\t").length == NUM_VAL);
+            return s;
+        }
+    }
+
+    // Default entries for values
+    public static FloatWritable[] defaultFloatValues = new FloatWritable[NUM_VAL];
+
+    // Default writable float array values
+    public static FloatArrayWritable defaultArrayWritableValues;
+
+    //==========================================================================
+
+    // Data structure initialization
+
+    public static void initx() {
+        //numFields = headerArr.length;
+        assert(valueArr.length == NUM_VAL);
+        assert(valueArr.length == defaultValueArr.length);
+
+        assert(outFieldArr.length == keyArr.length + valueArr.length);
+        assert(outFieldArr.length == outFieldStr.split("\t").length);
+
+        // Position index of field data in a line
+        for(int i = 0; i < fieldArr.length; i++) {
+            fieldMap.put(fieldArr[i], i);
+        }
+
+        // Position index of keys
+        for(int i = 0; i < keyArr.length; i++) {
+            keyMap.put(keyArr[i], i);
+        }
+
+        // Position index of values
+        for(int i = 0; i < valueArr.length; i++) {
+            valueMap.put(valueArr[i], i);
+        }
+
+        // Position index of output fields
+        for(int i = 0; i < outFieldArr.length; i++) {
+            outFieldMap.put(outFieldArr[i], i);
+        }
+
+        // Default entries for values
+        for(int i = 0; i < defaultValueArr.length; i++) {
+            defaultFloatValues[i] = new FloatWritable(defaultValueArr[i]);
+        }
+        defaultArrayWritableValues = new FloatArrayWritable();
+        defaultArrayWritableValues.set(defaultFloatValues);
+
+        // List of boroughs to include in analysis
+        //for(String s: filterBoroughArr) {
+        //    filterBoroughColl.add(s);
+        //}
+        filterBoroughColl = new HashSet<String>(Arrays.asList(filterBoroughArr));
+        filterOddYearColl = new HashSet<String>(Arrays.asList(filterOddYearArr));
+    }
+
+    //==========================================================================
+
+    // Map
+
+    /** @noinspection FieldMayBeFinal*/
+    public static class RestaurantMapper
+        extends Mapper<Object, Text, Text, FloatArrayWritable>{
+
+        //public static class TokenizerMapper
+        //extends Mapper<Object, Text, Text, IntWritable>{
+
+        //private final static IntWritable one = new IntWritable(1);
+        //private Text word = new Text();
+        //private Text key_text = new Text();
+        //private final static FloatArrayWritable one = new IntWritable(1);
+
+        public void map(Object key, Text value, Context context
+        ) throws IOException, InterruptedException {
+            /*
+            StringTokenizer itr = new StringTokenizer(value.toString());
+            while (itr.hasMoreTokens()) {
+                word.set(itr.nextToken());
+                context.write(word, one);
+            }
+            */
+
+            // Get input line
+            String line = value.toString();
+            // Split line into array of data field values
+            String[] tokens = line.split("\t");
+            // Create a restaurant grade map with the values
+            Map<String, String> rg = new HashMap<String, String>();
+            for(int i = 0; i < fieldArr.length; i++) {
+                rg.put(fieldArr[i], tokens[i]);
+            }
+
+            // Parse an integer number from a string
+            //int i = 10; // default value
+            {
+                int i = 10; // default value
+                //Optional<Integer> opf = Optional.ofNullable(Integer.parseInt("1563"));
+                try {
+                    //noinspection UnusedAssignment
+                    i = Integer.parseInt("1563");
+                } catch(NumberFormatException e) {
+                    // LATER: use regex to avoid raising exceptions on
+                    // invalid input. Refer to Double.valueOf() docs below.
+                    // https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/lang/Double.html#valueOf(java.lang.String)
+                }
+
+            }
+
+            // TODO: Modify filter with new key format <borough,grades_date_year,grades_date_month>
+
+            // Create a mapped key value pair, filtering where necessary
+            if((filterBoroughColl.isEmpty() ||
+                    filterBoroughColl.contains(rg.get("borough"))) &&
+            (filterOddYearColl.isEmpty() ||
+                    filterOddYearColl.contains(rg.get("grades_date_year")))) {
+
+                // TODO: Use new key format <borough,grades_date_year,grades_date_month>
+
+                //String ks = String.format("%s\t%s", rg.get("borough"), rg.get("cuisine"));
+                String ks = String.format("%s", rg.get("borough"), rg.get("grades_date_year"),
+                        rg.get("grades_date_ymd").split("-")[1]);
+                assert(ks.split("\t").length == keyArr.length);
+                Text keyx = new Text(ks);
+
+                // Parse a floating point number from a string
+                //float f = 10.0F; // default value
+                {
+                    float f = 10.0F; // default value
+                    //Optional<Float> opf = Optional.ofNullable(Float.parseFloat("1563.4137"));
+                    try {
+                        //noinspection UnusedAssignment
+                        f = Float.parseFloat("1563.4137");
+                    } catch(NumberFormatException e) {
+                        // LATER: use regex to avoid raising exceptions on
+                        // invalid input. Refer to Double.valueOf() docs below.
+                        // https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/lang/Double.html#valueOf(java.lang.String)
+                    }
+
+                }
+
+                // TODO: Read and convert from input to key/value
+
+                // Values
+
+                // record_count
+
+                // count_grades
+
+                // sum_grades_score
+                float sum_grades_score = (float)0.0;
+                try {
+                    sum_grades_score = Float.parseFloat(rg.get("grades_score"));
+                } catch(NumberFormatException e) {
+
+                }
+
+                // avg_grades_score
+                float avg_grades_score = (float)0.0;
+                try {
+                    avg_grades_score = Float.parseFloat(rg.get("grades_score"));
+                } catch(NumberFormatException e) {
+
+                }
+                // min_grades_score
+                float min_grades_score = (float)0.0;
+                try {
+                    min_grades_score = Float.parseFloat(rg.get("grades_score"));
+                } catch(NumberFormatException e) {
+
+                }
+
+                // max_grades_score
+                float max_grades_score = (float)0.0;
+                try {
+                    max_grades_score = Float.parseFloat(rg.get("grades_score"));
+                } catch(NumberFormatException e) {
+
+                }
+
+                FloatWritable[] fwa = new FloatWritable[] {
+                    // record_count
+                    new FloatWritable((float)1.0),
+                    // count_grades
+                    new FloatWritable((float)1.0),
+                    // sum_grades_score
+                    new FloatWritable(sum_grades_score),
+                    // avg_grades_score
+                    new FloatWritable(avg_grades_score),
+                    // min_grades_score
+                    new FloatWritable(min_grades_score),
+                    // max_grades_score
+                    new FloatWritable(max_grades_score),
+                };
+
+                assert(fwa.length == NUM_VAL);
+                //FloatArrayWritable valuex = defaultArrayWritableValues;
+                FloatArrayWritable valuex = new FloatArrayWritable();
+                valuex.set(fwa);
+                context.write(keyx, valuex);
+            }
+        }
+    }
+
+    //==========================================================================
+
+    // Reduce
+
+    public static class RestaurantReducer
+        extends Reducer<Text,FloatArrayWritable,Text,FloatArrayWritable> {
+
+        //public static class IntSumReducer
+        //extends Reducer<Text,IntWritable,Text,IntWritable> {
+
+        //private IntWritable result = new IntWritable();
+        //private FloatArrayWritable result_value = new FloatArrayWritable();
+
+        //public void reduce(Text key, Iterable<IntWritable> values,
+        //                   Context context
+        //) throws IOException, InterruptedException {
+
+        public void reduce(Text key, Iterable<FloatArrayWritable> values,
+                           Context context
+        ) throws IOException, InterruptedException {
+            //int sum = 0;
+            //for (IntWritable val : values) {
+            //    sum += val.get();
+            //}
+            //result.set(sum);
+            //context.write(key, result);
+
+            // Reduce multiple metric value records into a single metric
+            // value record
+
+            // TODO: Perform metric reduce for current and new metrics
+
+            float[] v = new float[NUM_VAL];
+
+            // record_count
+
+            // count_grades
+
+            // sum_grades_score
+
+            // avg_grades_score
+
+            // min_grades_score
+
+            // max_grades_score
+
+            for(FloatArrayWritable val : values) {
+                //sum += val.get();
+                //float valArr[] = new float[NUM_VAL]
+                //FloatWritable fwa[] = (FloatWritable[]) val.get();
+
+                //FloatWritable fwa[] = new FloatWritable[NUM_VAL];
+                //Writable wa[] = val.get();
+                //for(int i = 0; i < fwa.length; i++) {
+                //    fwa[i] = new FloatWritable((float)0.0);
+                //}
+
+                FloatWritable[] fwa = val.getFloatWritableArray();
+
+                // record_count
+                v[0] = (v[0] != 0 ? v[0] : 0) + fwa[0].get();
+
+                // count_grades
+                v[1] = (v[1] != 0 ? v[1] : 0) + fwa[0].get();
+
+                // sum_grades_score
+                v[2] = (v[2] != 0 ? v[2] : 0) + fwa[0].get();
+
+                // avg_grades_score (to be calculated outside loop)
+
+                // min_grades_score
+                if (v[4] == 0 || fwa[4].get() < v[4]) {
+                    v[4] = fwa[4].get();
+                }
+                v[4] = v[4] < 5 ? 5 : v[4];
+                // max_grades_score
+                if (v[5] == 0 || fwa[5].get() < v[5]) {
+                    v[5] = fwa[5].get();
+                }
+                v[5] = v[5] < 5 ? 5 : v[5];
+            }
+
+            // avg_grades_score
+            v[valueMap.get("avg_grades_score")] = v[valueMap.get("count_grades")] != 0
+                    ? v[valueMap.get("sum_grades_score")] / v[valueMap.get("count_grades")]
+                    : 0;
+
+            // Pack reduced results into a Hadoop writable float array
+            FloatWritable[] fwa = new FloatWritable[] {
+                new FloatWritable(v[0]),
+                new FloatWritable(v[1]),
+                new FloatWritable(v[2]),
+                new FloatWritable(v[3]),
+                new FloatWritable(v[4]),
+                new FloatWritable(v[5])
+            };
+
+            assert(fwa.length == NUM_VAL);
+            FloatArrayWritable result_value = new FloatArrayWritable();
+            result_value.set(fwa);
+
+            context.write(key, result_value);
+        }
+    }
+
+    //==========================================================================
+
+    // Main
+
+    //public static void main(String[] args) throws Exception {
+    public static void main_code(String[] args) throws Exception {
+        System.out.println("begin ra");
+
+        initx();
+
+        // Set up logging
+
+        Logger rootLogger = Logger.getRootLogger();
+
+        // To see warnings, enable WARN line below
+        //rootLogger.setLevel(Level.ALL);
+        //rootLogger.setLevel(Level.TRACE);
+        //rootLogger.setLevel(Level.DEBUG);
+        //rootLogger.setLevel(Level.INFO);
+        rootLogger.setLevel(Level.WARN);
+        //rootLogger.setLevel(Level.ERROR);
+        //rootLogger.setLevel(Level.FATAL);
+        //rootLogger.setLevel(Level.OFF);
+
+        PatternLayout layout = new PatternLayout("%d{ISO8601} [%t] %-5p %c %x - %m%n");
+        rootLogger.addAppender(new ConsoleAppender(layout));
+
+        // Set up Hadoop job
+
+        FileUtils.deleteDirectory(new File("ra001-output"));
+
+        Configuration conf = new Configuration();
+        Job job = Job.getInstance(conf, "restaurant analysis 001");
+        job.setJarByClass(RestaurantAnalysis001.class);
+        job.setMapperClass(RestaurantMapper.class);
+        job.setCombinerClass(RestaurantReducer.class);
+        job.setReducerClass(RestaurantReducer.class);
+        job.setOutputKeyClass(Text.class);
+        //job.setOutputValueClass(IntWritable.class);
+        job.setOutputValueClass(FloatArrayWritable.class);
+        //FileInputFormat.addInputPath(job, new Path(args[0]));
+        //FileOutputFormat.setOutputPath(job, new Path(args[1]));
+        FileInputFormat.addInputPath(job, new Path("ra001-input"));
+        FileOutputFormat.setOutputPath(job, new Path("ra001-output"));
+
+        // Run Hadoop job
+
+        boolean jobStatus;
+
+        //System.exit(job.waitForCompletion(true) ? 0 : 1);
+        jobStatus = job.waitForCompletion(true);
+
+        if(!jobStatus) {
+            throw new Exception("ERROR: Hadoop job failed");
+        }
+
+        // Sort output results and copy to output file
+
+        String outputFileName = "ra.csv";
+        var outputFilePath = Paths.get(outputFileName);
+        List<String> headerLines = new ArrayList<String>(Arrays.asList(outFieldStr));
+        Files.write(outputFilePath, headerLines, Charset.forName("UTF-8"));
+        String hadoopOutputFileName = "ra001-output/part-r-00000";
+        ArrayList<String> resData = new ArrayList<String>(Files.readAllLines(
+            Paths.get(hadoopOutputFileName)));
+        Collections.sort(resData, new RestaurantResultComparator());
+        Files.write(outputFilePath, resData,
+            Charset.forName("UTF-8"), StandardOpenOption.WRITE,
+            StandardOpenOption.APPEND);
+
+        System.out.println("end ra");
+
+        System.out.println("Results available in ra.csv");
+    }
+}
